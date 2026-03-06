@@ -1,4 +1,4 @@
-from project_logging import configure_logging, get_logger
+from settings import configure_logging, get_logger
 
 
 def main():
