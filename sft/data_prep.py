@@ -1,3 +1,17 @@
+"""Load and normalize GSM8K data for SFT workflows.
+
+Purpose:
+- Provide deterministic data-loading and answer transformation helpers.
+
+Entry points:
+- `load_gsm8k_train` for parquet-first dataset loading.
+- `transform_gsm8k_resp` for XML conversion of GSM8K answers.
+
+If you need to change behavior:
+- Start with `transform_gsm8k_resp`; trainer code depends on its output
+  columns and XML shape.
+"""
+
 from pathlib import Path
 import re
 from xml.sax.saxutils import escape
@@ -10,6 +24,18 @@ _GSM8K_PARQUET_PATH = Path("data/gsm8k-main-train.parquet")
 
 
 def load_gsm8k_train():
+    """Load GSM8K train split from local parquet, then hub as fallback.
+
+    Why it exists:
+        Keep local runs deterministic and fast after the first fetch.
+
+    Returns:
+        Dataset: The GSM8K train split.
+
+    Side effects:
+        Writes `data/gsm8k-main-train.parquet` when local cache is missing.
+        Emits structured logs for load/fallback decisions.
+    """
     try:
         dataset = Dataset.from_parquet(str(_GSM8K_PARQUET_PATH))
         logger.info(
@@ -34,6 +60,20 @@ def load_gsm8k_train():
 
 
 def transform_gsm8k_resp(row):
+    """Convert one GSM8K row into XML-formatted answer fields.
+
+    Why it exists:
+        SFT training expects answers in `<response>` XML with reasoning and
+        final-answer sections.
+
+    Args:
+        row (dict): Dataset row with GSM8K `answer` text in `... #### value`
+            format and optional `<<calc>>` traces.
+
+    Returns:
+        dict: Columns containing normalized reasoning, `final_answer`,
+            `response_xml`, and `answer` overwritten with XML.
+    """
     raw_answer = row.get("answer", "")
     parts = raw_answer.split("####", maxsplit=1)
     reasoning_raw = parts[0].strip()

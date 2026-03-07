@@ -1,4 +1,18 @@
+"""Partial-LoRA SFT entrypoint over XML-transformed GSM8K data.
+
+Purpose:
+- Load model, acquire transformed dataset, and host training loop scaffolding.
+
+Owns:
+- Dataset bootstrap logic (`data/gsm8k-main-train-xml.parquet`).
+- Top-level training lifecycle hooks (`step`, `epoch`, `train`).
+
+If you need to change behavior:
+- Adjust data loading near module init, then implement `step` and `epoch`.
+"""
+
 from pathlib import Path
+
 from models.partial import get_model
 from accelerate import Accelerator
 from settings import get_logger
@@ -6,7 +20,9 @@ from settings import MlflowMode, get_settings
 import torch
 import torch.nn as nn
 from sft.data_prep import load_gsm8k_train, transform_gsm8k_resp
+from sft.qwen_tok_dataset import QwenTokDataset
 from datasets import Dataset
+import click
 
 
 logger = get_logger(__name__)
@@ -23,8 +39,7 @@ if settings.set_mlflow is MlflowMode.ON:
 accelerator = Accelerator()
 logger.info(f"{__file__} initialized on device=%s", accelerator.device)
 
-model, tokenizer = get_model()
-
+# INFO: load XML formatted dataset first
 try:
     dataset = Dataset.from_parquet(_GSM8K_XML_PARQUET_PATH.as_posix())
 except FileNotFoundError:
@@ -36,5 +51,35 @@ except FileNotFoundError:
     logger.info(f"{__file__} transformation to SFT required response completed")
 
 
-def train():
+def step(row):
+    """Execute one training step for a tokenized batch row."""
+    raise NotImplementedError()
+
+
+def epoch(model, tokenizer):
+    """Run one full pass over the training dataset."""
+    raise NotImplementedError()
+
+
+@click.command()
+@click.option(
+    "--alpha", default=0.001, type=click.FLOAT, help="learning rate for backward pass"
+)
+@click.option("--epochs", default=1, help="#epochs for SFT training")
+def train(epochs: int = 3, alpha: float = 0.001):
+    """Run SFT for a fixed number of epochs.
+
+    Args:
+        epochs (int): Number of training epochs to execute.
+    """
+    model, tokenizer = get_model()
+    optim = torch.optim.Adam(model.parameters(), lr=1e-12)
+    loss = nn.CrossEntropyLoss()
+
+    for ep in range(1, epochs + 1):
+        epoch(model, tokenizer)
+    raise NotImplementedError()
+
+
+if __name__ == "__main__":
     raise NotImplementedError()
