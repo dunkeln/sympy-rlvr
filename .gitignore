@@ -12,6 +12,7 @@ wheels/
 
 # personal files
 notebooks/
+nb_*
 data/
 .hf_cache/
 

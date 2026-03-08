@@ -6,6 +6,10 @@ from sft.qwen_tok_dataset import QwenTokDataset
 
 
 class FakeTokenizer:
+    eos_token = None
+    pad_token = None
+    pad_token_id = 0
+
     def __call__(self, text: str, add_special_tokens: bool, return_tensors: str):
         assert add_special_tokens is False
         assert return_tensors == "pt"
@@ -25,7 +29,9 @@ def test_qwen_tok_dataset_masks_question_tokens() -> None:
     ds = Dataset.from_dict({"question": ["ab"], "answer": ["xyz"]})
     tok_ds = QwenTokDataset(ds=ds, tok=FakeTokenizer())
 
-    input_ids, labels = tok_ds[0]
+    sample = tok_ds[0]
+    input_ids = sample["input_ids"]
+    labels = sample["labels"]
 
     q_len = 2
     assert isinstance(input_ids, torch.Tensor)

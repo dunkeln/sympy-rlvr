@@ -19,6 +19,7 @@ from settings import get_logger
 from settings import MlflowMode, get_settings
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from sft.data_prep import load_gsm8k_train, transform_gsm8k_resp
 from sft.qwen_tok_dataset import QwenTokDataset
 from datasets import Dataset
@@ -62,10 +63,8 @@ def epoch(model, tokenizer):
 
 
 @click.command()
-@click.option(
-    "--alpha", default=0.001, type=click.FLOAT, help="learning rate for backward pass"
-)
-@click.option("--epochs", default=1, help="#epochs for SFT training")
+@click.option("--alpha", type=click.FLOAT, help="learning rate for backward pass")
+@click.option("--epochs", default=1, help="num epochs for SFT training")
 def train(epochs: int = 3, alpha: float = 0.001):
     """Run SFT for a fixed number of epochs.
 
@@ -73,11 +72,14 @@ def train(epochs: int = 3, alpha: float = 0.001):
         epochs (int): Number of training epochs to execute.
     """
     model, tokenizer = get_model()
-    optim = torch.optim.Adam(model.parameters(), lr=1e-12)
+    optim = torch.optim.Adam(model.parameters(), lr=alpha)
     loss = nn.CrossEntropyLoss()
+    dataloader = DataLoader(QwenTokDataset(dataset, tokenizer))
 
     for ep in range(1, epochs + 1):
         epoch(model, tokenizer)
+
+        # TODO: validation post-training
     raise NotImplementedError()
 
 
