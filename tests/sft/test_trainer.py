@@ -67,10 +67,29 @@ def test_epoch_returns_average_loss() -> None:
     optim = torch.optim.SGD(model.parameters(), lr=0.05)
     dataloader = [_make_batch(), _make_batch()]
 
-    avg_loss = trainer.epoch(model, dataloader, optim, epoch_idx=1)
+    avg_loss, val_loss = trainer.epoch(model, dataloader, optim, epoch_idx=1)
 
     assert isinstance(avg_loss, float)
     assert avg_loss > 0.0
+    assert val_loss is None
+
+
+def test_epoch_returns_validation_loss() -> None:
+    model = DummyCausalLM().to(trainer.device)
+    optim = torch.optim.SGD(model.parameters(), lr=0.05)
+    dataloader = [_make_batch()]
+    val_dataloader = [_make_batch()]
+
+    avg_loss, val_loss = trainer.epoch(
+        model,
+        dataloader,
+        optim,
+        epoch_idx=1,
+        val_dataloader=val_dataloader,
+    )
+
+    assert isinstance(val_loss, float)
+    assert val_loss > 0.0
 
 
 def test_train_runs_with_fake_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,3 +115,4 @@ def test_train_runs_with_fake_model(monkeypatch: pytest.MonkeyPatch) -> None:
     assert summary["epochs"] == 1
     assert summary["dataset_size"] == 2
     assert summary["final_epoch_loss"] > 0.0
+    assert summary["final_val_loss"] is None

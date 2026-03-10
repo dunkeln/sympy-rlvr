@@ -2,7 +2,7 @@ import logging
 import os
 from enum import Enum
 from functools import lru_cache
-from typing import Final
+from typing import Any, Final
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from rich.logging import RichHandler
@@ -10,9 +10,15 @@ from rich.logging import RichHandler
 _DEFAULT_LEVEL: Final[str] = "INFO"
 
 
-class MlflowMode(str, Enum):
-    ON = "on"
-    OFF = "off"
+class _StructuredLoggerAdapter(logging.LoggerAdapter):
+    def __init__(self, logger: logging.Logger, extra: dict[str, Any] | None = None) -> None:
+        super().__init__(logger, extra or {})
+
+    def process(self, msg: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        extra = kwargs.get("extra", {})
+        merged = {**self.extra, **extra}
+        kwargs["extra"] = merged
+        return msg, kwargs
 
 
 class ModelSize(str, Enum):
@@ -23,7 +29,6 @@ class ModelSize(str, Enum):
 
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-    set_mlflow: MlflowMode = MlflowMode.OFF
     model: ModelSize = ModelSize.MED
 
     @property
@@ -68,6 +73,8 @@ def configure_logging(*, force: bool = False) -> None:
     )
 
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(name: str) -> logging.LoggerAdapter:
     configure_logging()
-    return logging.getLogger(name)
+    base_logger = logging.getLogger(name)
+    default_extra = {"app": "sympy-rlvr", "component": name}
+    return _StructuredLoggerAdapter(base_logger, default_extra)
