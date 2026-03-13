@@ -1,0 +1,29 @@
+name: Sync to Sagemaker
+
+on:
+  push:
+    branches: [train]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::979667333968:role/sympy-rlvr-OIDC
+          aws-region: us-east-1
+
+      - name: Sync repo to S3
+        run: |
+          aws s3 sync . s3://training-artifacts-979667333968-us-east-1/rlvr_sympy/shared/ \
+            --delete \
+            --exclude ".git/*" \
+            --exclude ".pytest_cache/*" \
+            --exclude ".venv/*" \
+            --exclude "mlflow.db"
