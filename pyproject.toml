@@ -17,6 +17,7 @@ dependencies = [
     "pytest>=9.0.2",
     "rich>=14.3.3",
     "ruff>=0.15.5",
+    "sagemaker>=3.5.0",
     "sympy>=1.14.0",
     "torch>=2.10.0",
     "tqdm>=4.67.3",
