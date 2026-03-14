@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from sagemaker.pytorch import PyTorch
 
@@ -15,8 +14,8 @@ def main() -> None:
         entry_point="sft/trainer.py",
         source_dir=".",
         role=TRAINING_ROLE,
-        instance_count=1,
-        instance_type="ml.g5.xlarge",
+        instance_count=int(os.environ.get("INSTANCE_COUNT", "1")),
+        instance_type=os.environ.get("INSTANCE_TYPE", "ml.g5.xlarge"),
         framework_version="2.0.0",
         py_version="py310",
         hyperparameters={
