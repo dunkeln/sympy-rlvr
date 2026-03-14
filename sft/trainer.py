@@ -275,3 +275,7 @@ def train(
             final_epoch_loss,
         )
         return summary
+
+
+if __name__ == "__main__":
+    train()

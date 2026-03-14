@@ -10,8 +10,9 @@ params = {
 
 
 estimator = PyTorch(
-    entry_point="../../sft/trainer.py",
-    role="",
+    entry_point="trainer.py",
+    src_dir="sft",
+    role=" 979667333968",
     instance_type="ml.g5.xlarge",
     instance_count=1,
     hyperparameters={**params},

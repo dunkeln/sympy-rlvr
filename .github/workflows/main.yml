@@ -21,7 +21,7 @@ jobs:
 
       - name: Sync repo to S3
         run: |
-          aws s3 sync . s3://training-artifacts-979667333968-us-east-1-an/rlvr_sympy/ \
+          aws s3 sync . s3://training-artifacts-979667333968-us-east-1-an/rlvr_sympy/shared \
             --delete \
             --exclude ".git/*" \
             --exclude ".pytest_cache/*" \
