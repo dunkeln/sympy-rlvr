@@ -11,8 +11,11 @@ params = {
 
 estimator = PyTorch(
     entry_point="trainer.py",
-    src_dir="sft",
-    role=" 979667333968",
+    source_dir="sft",
+    role="arn:aws:iam::979667333968:role/studio-admin",
+    # INFO: latest versions
+    framework_version="2.8",
+    py_version="py312",
     instance_type="ml.g5.xlarge",
     instance_count=1,
     hyperparameters={**params},
