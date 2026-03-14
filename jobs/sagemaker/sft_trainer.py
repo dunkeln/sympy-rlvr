@@ -1,42 +1,43 @@
 import os
+from pathlib import Path
 
-from sagemaker.train import ModelTrainer
-from sagemaker.train.configs import InputData
+from sagemaker.pytorch import PyTorch
 
 
-def _build_trainer():
-    """Return a ModelTrainer configured for this project."""
-    training_image = os.environ.get("TRAINING_IMAGE", "sympy-rlvr-img")
-    role = os.environ.get(
-        "SAGEMAKER_ROLE", "arn:aws:iam::979667333968:role/studio-admin"
+TRAINING_ROLE = "arn:aws:iam::979667333968:role/studio-admin"
+TRAINING_DATA_URI = (
+    "s3://training-artifacts-979667333968-us-east-1-an/rlvr_sympy/shared/data"
+)
+
+
+def main() -> None:
+    estimator = PyTorch(
+        entry_point="sft/trainer.py",
+        source_dir=".",
+        role=TRAINING_ROLE,
+        instance_count=1,
+        instance_type="ml.g5.xlarge",
+        framework_version="2.0.0",
+        py_version="py310",
+        hyperparameters={
+            "--epochs": os.environ.get("EPOCHS", "1"),
+            "--alpha": os.environ.get("ALPHA", "0.001"),
+            "--batch": os.environ.get("BATCH", "64"),
+            "--patience": os.environ.get("PATIENCE", "3"),
+            "--delta": os.environ.get("DELTA", "0.01"),
+        },
+        environment={
+            "TRAINING_DATA_URI": TRAINING_DATA_URI,
+            "MLFLOW_TRACKING_URI": os.environ.get("MLFLOW_TRACKING_URI", ""),
+        },
     )
-    return ModelTrainer(
-        training_image=training_image,
-        role=role,
+
+    estimator.fit(
+        TRAINING_DATA_URI,
+        logs=True,
+        wait=True,
     )
-
-
-def _make_input_data() -> list[InputData] | None:
-    """Construct InputData only if TRAINING_DATA_URI is set."""
-    training_data_uri = os.environ.get(
-        "TRAINING_DATA_URI",
-        "s3://training-artifacts-979667333968-us-east-1-an/rlvr_sympy/shared/data",
-    )
-    if not training_data_uri:
-        return None
-    return [
-        InputData(
-            channel_name="training",
-            data_source=training_data_uri,
-        )
-    ]
-
-
-def run_training() -> None:
-    trainer = _build_trainer()
-    input_data_config = _make_input_data()
-    trainer.train(input_data_config=input_data_config)
 
 
 if __name__ == "__main__":
-    run_training()
+    main()
