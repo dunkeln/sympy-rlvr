@@ -12,7 +12,7 @@ logger.info("Selected model profile=%s repo=%s", settings.model.value, settings.
 try:
     logger.info("Trying local model cache for %s", settings.model_repo_id)
     model = AutoModelForCausalLM.from_pretrained(
-        settings.model_repo_id, dtype="auto", local_files_only=True
+        settings.model_repo_id, dtype="bfloat16", local_files_only=True
     )
     logger.info("Loaded model from local cache")
 except OSError:
@@ -20,7 +20,9 @@ except OSError:
         "Local cache miss for %s; falling back to Hugging Face download",
         settings.model_repo_id,
     )
-    model = AutoModelForCausalLM.from_pretrained(settings.model_repo_id, dtype="auto")
+    model = AutoModelForCausalLM.from_pretrained(
+        settings.model_repo_id, dtype="bfloat16"
+    )
 
 model.config.use_cache = False
 logger.info("Base model initialized with use_cache=%s", model.config.use_cache)

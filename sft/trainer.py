@@ -169,15 +169,113 @@ def epoch(
 )
 @click.option("--patience", show_default=True, help="patience for early stopping")
 @click.option("--delta", show_default=True, help="threshold to stop")
+@click.option(
+    "--seq_len", show_default=True, help="sequence length for padded tokenization"
+)
 def train(
     epochs: int = 1,
     alpha: float = 0.001,
     batch: int = 64,
     patience: int = 3,
     delta: float = 0.01,
+    seq_len: int = 384,
 ) -> dict[str, Any]:
     """Run SFT for a fixed number of epochs."""
 
+    model, tokenizer = get_model()
+    model = model.to(device)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optim = torch.optim.Adam(trainable_params, lr=alpha)
+    tok_dataset = QwenTokDataset(dataset, tokenizer, max_seq_len=seq_len)
+    dataloader = DataLoader(
+        tok_dataset,
+        batch_size=batch,
+        shuffle=True,
+        collate_fn=tok_dataset.collate_fn,
+    )
+
+    best_val_loss = float("inf")
+    epochs_without_improve = 0
+    early_stop_triggered = False
+
+    payload = {
+        "epochs": epochs,
+        "learning rate": alpha,
+        "batch size": batch,
+        "model": f"qwen-{settings_conf.model}",
+        "optimizer": type(optim).__name__,
+        "loss": "CE Loss",
+        "dataset size": len(tok_dataset),
+    }
+    if mlflow is not None:
+        mlflow.log_params(payload)
+    else:
+        logger.info("sft_train_start", extra=payload)
+
+    final_epoch_loss = 0.0
+    final_val_loss: Optional[float] = None
+    for ep in range(1, epochs + 1):
+        train_loss, val_loss = epoch(model, dataloader, optim, ep)
+
+        # INFO: guards for early stopping
+        if val_loss is not None:
+            if val_loss + delta < best_val_loss:
+                best_val_loss = val_loss
+                epochs_without_improve = 0
+            else:
+                epochs_without_improve += 1
+
+        if val_loss is not None and epochs_without_improve >= patience:
+            early_stop_triggered = True
+            msg = (
+                f"early stop triggered after {patience} epochs "
+                f"without improvement (val_loss={val_loss:.6f})"
+            )
+            logger.info(msg, extra={"epoch": ep, "patience": patience})
+            if mlflow is not None:
+                mlflow.set_tag("error", msg)
+            break
+
+        final_epoch_loss = train_loss
+        final_val_loss = val_loss
+        if mlflow is not None:
+            mlflow.log_metric("train/loss", train_loss, step=ep)
+            if val_loss is not None:
+                mlflow.log_metric("validation/loss", val_loss, step=ep)
+
+    summary = {
+        "epochs": epochs,
+        "learning_rate": alpha,
+        "dataset_size": len(tok_dataset),
+        "final_epoch_loss": final_epoch_loss,
+        "final_val_loss": final_val_loss,
+        "early_stopped": early_stop_triggered,
+    }
+
+    if mlflow is not None:
+        mlflow.log_metrics(
+            {
+                "summary/train_loss": final_epoch_loss,
+                "summary/val_loss": final_val_loss
+                if final_val_loss is not None
+                else -1.0,
+                "summary/early_stop": 1.0 if early_stop_triggered else 0.0,
+            }
+        )
+        lora_artifact = Path("artifacts/lora_state.pt")
+        lora_artifact.parent.mkdir(exist_ok=True)
+        torch.save(model.state_dict(), lora_artifact)
+        mlflow.log_artifact(lora_artifact.as_posix())
+
+    logger.info(
+        "sft_train_complete epochs=%s final_epoch_loss=%.6f",
+        epochs,
+        final_epoch_loss,
+    )
+    return summary
+
+
+if __name__ == "__main__":
     import mlflow
 
     mlflow.set_experiment("SFT Training")
@@ -185,97 +283,4 @@ def train(
     mlflow.config.set_system_metrics_sampling_interval(1)  # pyright: ignore[reportPrivateImportUsage]
 
     with mlflow.start_run() as run:
-        model, tokenizer = get_model()
-        model = model.to(device)
-        optim = torch.optim.Adam(model.parameters(), lr=alpha)
-        tok_dataset = QwenTokDataset(dataset, tokenizer)
-        dataloader = DataLoader(
-            tok_dataset,
-            batch_size=batch,
-            shuffle=True,
-            collate_fn=tok_dataset.collate_fn,
-        )
-
-        best_val_loss = float("inf")
-        epochs_without_improve = 0
-        early_stop_triggered = False
-
-        payload = {
-            "epochs": epochs,
-            "learning rate": alpha,
-            "batch size": batch,
-            "model": f"qwen-{settings_conf.model}",
-            "optimizer": type(optim).__name__,
-            "loss": "CE Loss",
-            "dataset size": len(tok_dataset),
-        }
-        if mlflow is not None:
-            mlflow.log_params(payload)
-        else:
-            logger.info("sft_train_start", extra=payload)
-
-        final_epoch_loss = 0.0
-        final_val_loss: Optional[float] = None
-        for ep in range(1, epochs + 1):
-            train_loss, val_loss = epoch(model, dataloader, optim, ep)
-
-            # INFO: guards for early stopping
-            if val_loss is not None:
-                if val_loss + delta < best_val_loss:
-                    best_val_loss = val_loss
-                    epochs_without_improve = 0
-                else:
-                    epochs_without_improve += 1
-
-            if val_loss is not None and epochs_without_improve >= patience:
-                early_stop_triggered = True
-                msg = (
-                    f"early stop triggered after {patience} epochs "
-                    f"without improvement (val_loss={val_loss:.6f})"
-                )
-                logger.info(msg, extra={"epoch": ep, "patience": patience})
-                if mlflow is not None:
-                    mlflow.set_tag("error", msg)
-                break
-
-            final_epoch_loss = train_loss
-            final_val_loss = val_loss
-            if mlflow is not None:
-                mlflow.log_metric("train/loss", train_loss, step=ep)
-                if val_loss is not None:
-                    mlflow.log_metric("validation/loss", val_loss, step=ep)
-
-        summary = {
-            "epochs": epochs,
-            "learning_rate": alpha,
-            "dataset_size": len(tok_dataset),
-            "final_epoch_loss": final_epoch_loss,
-            "final_val_loss": final_val_loss,
-            "early_stopped": early_stop_triggered,
-        }
-
-        if mlflow is not None:
-            mlflow.log_metrics(
-                {
-                    "summary/train_loss": final_epoch_loss,
-                    "summary/val_loss": final_val_loss
-                    if final_val_loss is not None
-                    else -1.0,
-                    "summary/early_stop": 1.0 if early_stop_triggered else 0.0,
-                }
-            )
-            lora_artifact = Path("artifacts/lora_state.pt")
-            lora_artifact.parent.mkdir(exist_ok=True)
-            torch.save(model.state_dict(), lora_artifact)
-            mlflow.log_artifact(lora_artifact.as_posix())
-
-        logger.info(
-            "sft_train_complete epochs=%s final_epoch_loss=%.6f",
-            epochs,
-            final_epoch_loss,
-        )
-        return summary
-
-
-if __name__ == "__main__":
-    train()
+        train()

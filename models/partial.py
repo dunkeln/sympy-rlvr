@@ -20,7 +20,7 @@ def get_model():
         logger.info("Trying local model/tokenizer cache for %s", settings.model_repo_id)
         model = AutoModelForCausalLM.from_pretrained(
             settings.model_repo_id,
-            dtype="auto",
+            dtype="bfloat16",
             local_files_only=True,
         ).to(accelerator.device)
         tokenizer = AutoTokenizer.from_pretrained(
@@ -34,7 +34,7 @@ def get_model():
         )
         model = AutoModelForCausalLM.from_pretrained(
             settings.model_repo_id,
-            dtype="auto",
+            dtype="bfloat16",
         ).to(accelerator.device)
         tokenizer = AutoTokenizer.from_pretrained(settings.model_repo_id)
 
