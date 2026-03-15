@@ -18,6 +18,7 @@ import click
 import torch
 from datasets import Dataset
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from models.partial import get_model
 from sft.data_prep import load_gsm8k_train, transform_gsm8k_resp
@@ -99,6 +100,7 @@ def epoch(
     optim: torch.optim.Optimizer,
     epoch_idx: int,
     val_dataloader: Optional[Iterable[dict[str, torch.Tensor]]] = None,
+    progress: Optional[tqdm] = None,
 ) -> tuple[float, Optional[float]]:
     """Run one training epoch and return the mean batch loss."""
     total_loss = 0.0
@@ -107,6 +109,8 @@ def epoch(
     logger.info("sft_epoch_start epoch=%s", epoch_idx)
     for batch_idx, row in enumerate(dataloader, start=1):
         batch_loss = step(model, optim, row)
+        if progress is not None:
+            progress.update(1)
         total_loss += batch_loss
         num_batches = batch_idx
 
@@ -127,13 +131,13 @@ def epoch(
     avg_loss = total_loss / num_batches
     if mlflow is not None:
         mlflow.log_metric("epoch/loss", avg_loss, step=epoch_idx)
-    else:
-        logger.info(
-            "sft_epoch_complete epoch=%s batches=%s avg_loss=%.6f",
-            epoch_idx,
-            num_batches,
-            avg_loss,
-        )
+
+    logger.info(
+        "sft_epoch_complete epoch=%s batches=%s avg_loss=%.6f",
+        epoch_idx,
+        num_batches,
+        avg_loss,
+    )
     val_loss = None
     if val_dataloader is not None:
         val_loss = _evaluate_loss(model, val_dataloader)
@@ -175,6 +179,9 @@ def epoch(
     show_default=True,
     help="sequence length for padded tokenization",
 )
+@click.option(
+    "--load-checkpoint", show_default=False, help="options: (None|latest|<RUN-ID>)"
+)
 def train(
     epochs: int = 1,
     alpha: float = 0.001,
@@ -182,10 +189,41 @@ def train(
     patience: int = 3,
     delta: float = 0.01,
     seq_len: int = 384,
+    load_checkpoint: None | str = None,
 ) -> dict[str, Any]:
     """Run SFT for a fixed number of epochs."""
 
     model, tokenizer = get_model()
+
+    # INFO: picking weights for lora
+    match load_checkpoint:
+        case None:
+            pass
+        case "latest":
+            if mlflow:
+                runs = mlflow.search_runs(order_by=["start_time DESC"], max_results=1)
+                run_id = runs.iloc[0].run_id
+                path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id, artifact_path="artifacts/lora_state.pt"
+                )
+                model.load_state_dict(
+                    torch.load(path, map_location=device), strict=False
+                )
+                logger.info("Loaded LoRA checkpoint from latest run_id=%s", run_id)
+            else:
+                logger.error("mlflow not found, defaulting to traingn base adapter")
+        case run_id:
+            if mlflow:
+                path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id, artifact_path="artifacts/lora_state.pt"
+                )
+                model.load_state_dict(
+                    torch.load(path, map_location=device), strict=False
+                )
+                logger.info("Loaded LoRA checkpoint from run_id=%s", run_id)
+            else:
+                logger.error("mlflow not found, defaulting to traingn base adapter")
+
     model = model.to(device)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optim = torch.optim.Adam(trainable_params, lr=alpha)
@@ -217,34 +255,37 @@ def train(
 
     final_epoch_loss = 0.0
     final_val_loss: Optional[float] = None
-    for ep in range(1, epochs + 1):
-        train_loss, val_loss = epoch(model, dataloader, optim, ep)
-
-        # INFO: guards for early stopping
-        if val_loss is not None:
-            if val_loss + delta < best_val_loss:
-                best_val_loss = val_loss
-                epochs_without_improve = 0
-            else:
-                epochs_without_improve += 1
-
-        if val_loss is not None and epochs_without_improve >= patience:
-            early_stop_triggered = True
-            msg = (
-                f"early stop triggered after {patience} epochs "
-                f"without improvement (val_loss={val_loss:.6f})"
+    with tqdm(total=epochs * len(dataloader), desc="train", unit="batch") as progress:
+        for ep in range(1, epochs + 1):
+            train_loss, val_loss = epoch(
+                model, dataloader, optim, ep, progress=progress
             )
-            logger.info(msg, extra={"epoch": ep, "patience": patience})
-            if mlflow is not None:
-                mlflow.set_tag("error", msg)
-            break
 
-        final_epoch_loss = train_loss
-        final_val_loss = val_loss
-        if mlflow is not None:
-            mlflow.log_metric("train/loss", train_loss, step=ep)
+            # INFO: guards for early stopping
             if val_loss is not None:
-                mlflow.log_metric("validation/loss", val_loss, step=ep)
+                if val_loss + delta < best_val_loss:
+                    best_val_loss = val_loss
+                    epochs_without_improve = 0
+                else:
+                    epochs_without_improve += 1
+
+            if val_loss is not None and epochs_without_improve >= patience:
+                early_stop_triggered = True
+                msg = (
+                    f"early stop triggered after {patience} epochs "
+                    f"without improvement (val_loss={val_loss:.6f})"
+                )
+                logger.info(msg, extra={"epoch": ep, "patience": patience})
+                if mlflow is not None:
+                    mlflow.set_tag("error", msg)
+                break
+
+            final_epoch_loss = train_loss
+            final_val_loss = val_loss
+            if mlflow is not None:
+                mlflow.log_metric("train/loss", train_loss, step=ep)
+                if val_loss is not None:
+                    mlflow.log_metric("validation/loss", val_loss, step=ep)
 
     summary = {
         "epochs": epochs,

@@ -43,7 +43,7 @@ def get_model():
         "Loaded model=%s,  use_cache=%s", settings.model_repo_id, model.config.use_cache
     )
 
-    qlora_partial = LoraConfig(
+    lora_partial = LoraConfig(
         r=16,
         lora_alpha=32,
         lora_dropout=0.05,
@@ -61,6 +61,6 @@ def get_model():
         task_type="CAUSAL_LM",
     )
 
-    model = get_peft_model(model, qlora_partial).to(accelerator.device)
+    model = get_peft_model(model, lora_partial).to(accelerator.device)
     logger.info("Applied partial LoRA adapter to model")
     return model, tokenizer
