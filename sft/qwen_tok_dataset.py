@@ -37,6 +37,10 @@ class QwenTokDataset(TorchDataset):
         eos_token = getattr(self.tok, "eos_token", None)
         if getattr(self.tok, "pad_token", None) is None and eos_token is not None:
             self.tok.pad_token = eos_token
+        if getattr(self.tok, "pad_token_id", None) is None:
+            eos_token_id = getattr(self.tok, "eos_token_id", None)
+            if eos_token_id is not None:
+                self.tok.pad_token_id = eos_token_id
 
     def __len__(self) -> int:
         """Return dataset size for DataLoader sampling."""
@@ -48,7 +52,8 @@ class QwenTokDataset(TorchDataset):
         B = len(batch)
         T = self.max_seq_len
         pad_id = self.tok.pad_token_id
-        assert isinstance(pad_id, int)
+        if not isinstance(pad_id, int):
+            raise ValueError("Tokenizer must expose an integer pad_token_id for collation")
 
         input_ids = torch.full((B, T), pad_id, dtype=torch.long)
         labels = torch.full((B, T), -100, dtype=torch.long)
