@@ -170,7 +170,10 @@ def epoch(
 @click.option("--patience", show_default=True, help="patience for early stopping")
 @click.option("--delta", show_default=True, help="threshold to stop")
 @click.option(
-    "--seq_len", show_default=True, help="sequence length for padded tokenization"
+    "--seq_len",
+    default=384,
+    show_default=True,
+    help="sequence length for padded tokenization",
 )
 def train(
     epochs: int = 1,

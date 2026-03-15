@@ -51,10 +51,11 @@ class QwenTokDataset(TorchDataset):
     ) -> dict[str, torch.Tensor]:
         B = len(batch)
         T = self.max_seq_len
-        pad_id = self.tok.pad_token_id
+        pad_id = self.tok.eos_token_id
         if not isinstance(pad_id, int):
-            raise ValueError("Tokenizer must expose an integer pad_token_id for collation")
-
+            raise ValueError(
+                "Tokenizer must expose an integer pad_token_id for collation"
+            )
         input_ids = torch.full((B, T), pad_id, dtype=torch.long)
         labels = torch.full((B, T), -100, dtype=torch.long)
         attention_mask = torch.zeros((B, T), dtype=torch.long)
@@ -101,7 +102,10 @@ class QwenTokDataset(TorchDataset):
         input_ids = torch.cat([q_tokens, a_tokens], dim=0)
 
         labels = torch.cat(
-            [torch.full((q_tokens.size(-1),), -100, dtype=torch.long), a_tokens.clone()],
+            [
+                torch.full((q_tokens.size(-1),), -100, dtype=torch.long),
+                a_tokens.clone(),
+            ],
             dim=0,
         )
 
