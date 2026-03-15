@@ -19,7 +19,7 @@ dependencies = [
     "ruff>=0.15.5",
     "sagemaker>=2.256,<3",
     "sympy>=1.14.0",
-    "torch>=2.10.0",
+    "torch==2.8.0",
     "tqdm>=4.67.3",
     "transformers>=5.3.0",
 ]
