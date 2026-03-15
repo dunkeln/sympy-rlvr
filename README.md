@@ -7,3 +7,9 @@ The core idea is simple: instead of relying on human labels or LLM judges, we us
 ## Project Goal
 
 Train a small language model to solve mathematical problems while using **symbolic verification as the reward signal**.
+
+## Training Snapshot
+
+The current SFT run was trained on a single `RTX A4500` GPU. The plot below shows the recorded training loss over that run.
+
+![Training loss curve](static/train_loss.svg)
