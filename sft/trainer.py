@@ -306,10 +306,10 @@ def train(
                 "summary/early_stop": 1.0 if early_stop_triggered else 0.0,
             }
         )
-        lora_artifact = Path("artifacts/lora_state.pt")
-        lora_artifact.parent.mkdir(exist_ok=True)
-        torch.save(model.state_dict(), lora_artifact)
-        mlflow.log_artifact(lora_artifact.as_posix())
+        lora_artifact_dir = Path("artifacts/lora_adapter")
+        lora_artifact_dir.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(lora_artifact_dir)
+        mlflow.log_artifacts(lora_artifact_dir.as_posix(), artifact_path="lora_adapter")
 
     logger.info(
         "sft_train_complete epochs=%s final_epoch_loss=%.6f",
