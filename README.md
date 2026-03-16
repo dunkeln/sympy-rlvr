@@ -10,6 +10,13 @@ Train a small language model to solve mathematical problems while using **symbol
 
 ## Training Snapshot
 
-The current SFT run was trained on a single `RTX A4500` GPU. The plot below shows the recorded training loss over that run.
+The current SFT run was trained on a single `RTX 2000 ADA` GPU. The charts below show the batch-level training loss, the epoch-level aggregate loss, and the held-out validation loss for the same run.
 
-![Training loss curve](static/train_loss.svg)
+
+![SFT train loss curve](static/sft/train_loss.svg)
+
+
+![SFT epoch loss curve](static/sft/epoch_loss.svg)
+
+
+![SFT validation loss curve](static/sft/validation_loss.svg)
