@@ -114,5 +114,7 @@ def test_train_runs_with_fake_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert summary["epochs"] == 1
     assert summary["dataset_size"] == 2
+    assert summary["train_dataset_size"] == 1
+    assert summary["validation_dataset_size"] == 1
     assert summary["final_epoch_loss"] > 0.0
-    assert summary["final_val_loss"] is None
+    assert summary["final_val_loss"] is not None

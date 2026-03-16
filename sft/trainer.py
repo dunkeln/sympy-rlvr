@@ -182,6 +182,13 @@ def epoch(
 @click.option(
     "--load-checkpoint", show_default=False, help="options: (None|latest|<RUN-ID>)"
 )
+@click.option(
+    "--val-split",
+    type=click.FLOAT,
+    default=0.1,
+    show_default=True,
+    help="fraction of dataset reserved for validation",
+)
 def train(
     epochs: int = 1,
     alpha: float = 0.001,
@@ -190,6 +197,7 @@ def train(
     delta: float = 0.01,
     seq_len: int = 384,
     load_checkpoint: None | str = None,
+    val_split: float = 0.1,
 ) -> dict[str, Any]:
     """Run SFT for a fixed number of epochs."""
 
@@ -227,13 +235,31 @@ def train(
     model = model.to(device)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optim = torch.optim.Adam(trainable_params, lr=alpha)
-    tok_dataset = QwenTokDataset(dataset, tokenizer, max_seq_len=seq_len)
+    dataset_size = len(dataset)
+    val_dataloader: Optional[DataLoader] = None
+    if 0.0 < val_split < 1.0 and dataset_size > 1:
+        split_dataset = dataset.train_test_split(test_size=val_split, seed=42)
+        train_source = split_dataset["train"]
+        val_source = split_dataset["test"]
+    else:
+        train_source = dataset
+        val_source = None
+
+    tok_dataset = QwenTokDataset(train_source, tokenizer, max_seq_len=seq_len)
     dataloader = DataLoader(
         tok_dataset,
         batch_size=batch,
         shuffle=True,
         collate_fn=tok_dataset.collate_fn,
     )
+    if val_source is not None and len(val_source) > 0:
+        val_tok_dataset = QwenTokDataset(val_source, tokenizer, max_seq_len=seq_len)
+        val_dataloader = DataLoader(
+            val_tok_dataset,
+            batch_size=batch,
+            shuffle=False,
+            collate_fn=val_tok_dataset.collate_fn,
+        )
 
     best_val_loss = float("inf")
     epochs_without_improve = 0
@@ -246,7 +272,9 @@ def train(
         "model": f"qwen-{settings_conf.model}",
         "optimizer": type(optim).__name__,
         "loss": "CE Loss",
-        "dataset size": len(tok_dataset),
+        "dataset size": dataset_size,
+        "train dataset size": len(tok_dataset),
+        "validation dataset size": len(val_source) if val_source is not None else 0,
     }
     if mlflow is not None:
         mlflow.log_params(payload)
@@ -258,7 +286,12 @@ def train(
     with tqdm(total=epochs * len(dataloader), desc="train", unit="batch") as progress:
         for ep in range(1, epochs + 1):
             train_loss, val_loss = epoch(
-                model, dataloader, optim, ep, progress=progress
+                model,
+                dataloader,
+                optim,
+                ep,
+                val_dataloader=val_dataloader,
+                progress=progress,
             )
 
             # INFO: guards for early stopping
@@ -290,7 +323,9 @@ def train(
     summary = {
         "epochs": epochs,
         "learning_rate": alpha,
-        "dataset_size": len(tok_dataset),
+        "dataset_size": dataset_size,
+        "train_dataset_size": len(tok_dataset),
+        "validation_dataset_size": len(val_source) if val_source is not None else 0,
         "final_epoch_loss": final_epoch_loss,
         "final_val_loss": final_val_loss,
         "early_stopped": early_stop_triggered,
