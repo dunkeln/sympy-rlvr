@@ -171,8 +171,8 @@ def epoch(
     show_default=True,
     help="batch size for training",
 )
-@click.option("--patience", show_default=True, help="patience for early stopping")
-@click.option("--delta", show_default=True, help="threshold to stop")
+@click.option("--patience", default=3, help="patience for early stopping")
+@click.option("--delta", default=0.01, help="threshold to stop")
 @click.option(
     "--seq_len",
     default=384,
