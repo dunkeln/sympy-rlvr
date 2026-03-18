@@ -11,6 +11,7 @@ Train a small language model to solve mathematical problems while using **symbol
 ## Training Snapshot
 
 The current SFT run was trained on a single `RTX 2000 ADA` GPU. The charts below show the batch-level training loss, the epoch-level aggregate loss, and the held-out validation loss for the same run.
+GSM8K bench success rates at **22%** on **100 samples**.
 
 
 ![SFT train loss curve](static/sft/train-loss.png)

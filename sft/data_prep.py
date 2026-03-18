@@ -18,12 +18,14 @@ from xml.sax.saxutils import escape
 
 from datasets import Dataset, load_dataset
 from settings import get_logger
+from typing import Literal
 
 logger = get_logger(__name__)
 _GSM8K_PARQUET_PATH = Path("data/gsm8k-main-train.parquet")
+_GSM8K_PARQUET_TEST_PATH = Path("data/gsm8k-main-test.parquet")
 
 
-def load_gsm8k_train():
+def load_gsm8k_train(type: Literal["train", "test"] = "train"):
     """Load GSM8K train split from local parquet, then hub as fallback.
 
     Why it exists:
@@ -37,25 +39,49 @@ def load_gsm8k_train():
         Emits structured logs for load/fallback decisions.
     """
     try:
-        dataset = Dataset.from_parquet(str(_GSM8K_PARQUET_PATH))
-        logger.info(
-            "Loaded GSM8K split=train from local parquet path=%s",
-            _GSM8K_PARQUET_PATH,
-        )
+        match type:
+            case "train":
+                dataset = Dataset.from_parquet(str(_GSM8K_PARQUET_PATH))
+                logger.info(
+                    "Loaded GSM8K split=train from local parquet path=%s",
+                    _GSM8K_PARQUET_PATH,
+                )
+            case "test":
+                dataset = Dataset.from_parquet(str(_GSM8K_PARQUET_TEST_PATH))
+                logger.info(
+                    "Loaded GSM8K split=test from local parquet path=%s",
+                    _GSM8K_PARQUET_TEST_PATH,
+                )
     except Exception as exc:
-        logger.warning(
-            "Local parquet unavailable at %s (%s). Fetching from Hugging Face.",
-            _GSM8K_PARQUET_PATH,
-            exc.__class__.__name__,
-        )
-        dataset = load_dataset("openai/gsm8k", "main", split="train")
-        _GSM8K_PARQUET_PATH.parent.mkdir(parents=True, exist_ok=True)
-        dataset.to_parquet(str(_GSM8K_PARQUET_PATH))
-        logger.info(
-            "Saved GSM8K split=train to local parquet path=%s", _GSM8K_PARQUET_PATH
-        )
+        match type:
+            case "train":
+                logger.warning(
+                    "Local parquet unavailable at %s (%s). Fetching from Hugging Face.",
+                    _GSM8K_PARQUET_PATH,
+                    exc.__class__.__name__,
+                )
+                dataset = load_dataset("openai/gsm8k", "main", split="train")
+                _GSM8K_PARQUET_PATH.parent.mkdir(parents=True, exist_ok=True)
+                dataset.to_parquet(str(_GSM8K_PARQUET_PATH))
+                logger.info(
+                    "Saved GSM8K split=train to local parquet path=%s",
+                    _GSM8K_PARQUET_PATH,
+                )
+            case "test":
+                logger.warning(
+                    "Local parquet unavailable at %s (%s). Fetching from Hugging Face.",
+                    _GSM8K_PARQUET_TEST_PATH,
+                    exc.__class__.__name__,
+                )
+                dataset = load_dataset("openai/gsm8k", "main", split="test")
+                _GSM8K_PARQUET_TEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+                dataset.to_parquet(str(_GSM8K_PARQUET_TEST_PATH))
+                logger.info(
+                    "Saved GSM8K split=test to local parquet path=%s",
+                    _GSM8K_PARQUET_TEST_PATH,
+                )
 
-    logger.info("Loaded GSM8K split=train with num_rows=%s", len(dataset))
+    logger.info("Loaded GSM8K split=%s with num_rows=%d", type, len(dataset))
     return dataset
 
 
