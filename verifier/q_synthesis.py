@@ -84,13 +84,22 @@ async def _generate_and_resolve(client: AsyncClient, difficulty: str, sem: async
         topic = random.choice(TOPICS[difficulty])
         _, q = await _chat(client, difficulty, topic).parse(QuestionFormat)
         logger.info("generated [%s/%s]: %s", difficulty, topic, q.question[:60])
-        answer = await resolve(q.question)
-        verified = answer != "unresolved"
-        logger.info("resolved [%s]: %s", "ok" if verified else "fail", q.question[:60])
+
+        if difficulty == "hard":
+            a1, a2 = await asyncio.gather(resolve(q.question), resolve(q.question))
+            verified = a1 != "unresolved" and a1 == a2
+            answer = a1 if verified else None
+            logger.info("resolved hard [%s]: %s", "ok" if verified else "disagreement", q.question[:60])
+        else:
+            answer = await resolve(q.question)
+            verified = answer != "unresolved"
+            answer = answer if verified else None
+            logger.info("resolved [%s]: %s", "ok" if verified else "fail", q.question[:60])
+
         return {
             "question": q.question,
             "difficulty": q.difficulty,
-            "final_answer": answer if verified else None,
+            "final_answer": answer,
             "verified": verified,
         }
 
