@@ -25,7 +25,9 @@ class QuestionFormat(BaseModel):
     difficulty: Literal["easy", "medium", "hard", "olympiad"] = Field(
         description="difficulty ranked in order of grade school math, college math, graduate level math and quant/olympid difficulty math"
     )
-    final_answer: int | float = Field(description="single numeric value final answer")
+    final_answer: int | float = Field(
+        description="single numeric value or expression as final answer"
+    )
 
 
 def chat(client: AsyncClient, difficulty):
@@ -64,13 +66,13 @@ async def _create_tasks(size: int, easy, medium, hard, olympiad, semaphore, out_
 
     async def run_one():
         async with sem:
-            return await chat(client, random.choice(difficulties)).sample()
+            return await chat(client, random.choice(difficulties)).parse(QuestionFormat)
 
     questions = [run_one() for _ in range(size)]
     logger.info("generating %d samples, difficulties: %s", size, str(difficulties))
     questions = await asyncio.gather(*questions)
+    questions = [q[1].model_dump() for q in questions]
     logger.info("generation complete")
-    questions = [json.loads(q.content) for q in questions]
     match out_file:
         case "":
             return questions
