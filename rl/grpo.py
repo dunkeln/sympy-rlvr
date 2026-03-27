@@ -184,7 +184,7 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                 model.train()
 
                 # score
-                rewards = [reward(t, ground_truth) for t in texts]
+                rewards = [reward(t, ground_truth, question) for t in texts]
                 advantages = compute_advantages(rewards)
 
                 # current policy log probs (with gradients)

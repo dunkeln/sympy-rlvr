@@ -12,7 +12,7 @@ The core idea: instead of a trained reward model or LLM judge, use **SymPy as a 
 |---|---|
 | `verifier/sympy_resolver.py` | Grok-4 calls SymPy tools (solve, integrate, factor, etc.) to derive answers — never trusts LLM prose |
 | `verifier/q_synthesis.py` | Async pipeline that generates math questions and resolves ground truths in parallel; hard questions are verified twice (must agree) |
-| `verifier/reward.py` | Training-time reward: 0.9 × symbolic correctness + 0.1 × format compliance |
+| `verifier/reward.py` | Dense rule-based reward across 8 signals — no LLM judge |
 | `rl/grpo.py` | GRPO training loop from scratch — rollout, group-relative advantages, clipped ratio loss, KL penalty |
 | `sft/trainer.py` | LoRA SFT baseline on Qwen2.5 |
 | `bench.py` | GSM8K benchmark to measure before/after |
@@ -109,6 +109,25 @@ loss = -min(ratio * adv, clipped * adv) + β * (cur_log_probs - ref_log_probs)
 ```
 
 The KL term keeps the policy close to the SFT reference, preventing reward hacking.
+
+---
+
+## Reward model
+
+All signals are rule-based — no LLM judge, no learned reward model. Every signal is computed in milliseconds with regex and SymPy.
+
+| Signal | Weight | How it's computed |
+|---|---|---|
+| Correctness | 0.50 | SymPy symbolic match; falls back to `exp(-3 × rel_err)` for near-misses |
+| Self-consistency | 0.10 | Final answer matches the last number computed in `<reasoning>` |
+| Reasoning depth | 0.10 | Count of math operators and numbers in `<reasoning>` |
+| Number grounding | 0.10 | Fraction of question's numbers that appear in reasoning |
+| Format | 0.08 | Presence of `<response>`, `<reasoning>`, `<final_answer>` tags |
+| Parsability | 0.07 | Model produces any numeric final answer at all |
+| Length sweet spot | 0.03 | Reasoning word count falls in 50–400 word target band |
+| Repetition penalty | 0.02 | Penalises repeated n-grams — catches looping output |
+
+The proximity decay on correctness means even wrong completions get differentiated rewards, ensuring GRPO always has non-zero advantage variance to learn from.
 
 ---
 
