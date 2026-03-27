@@ -21,3 +21,22 @@ GSM8K bench success rates at **22%** on **100 samples**.
 
 
 ![SFT validation loss curve](static/sft/validation-loss.png)
+
+
+### Finetuning steps
+
+```bash
+# Synthesize questions
+python -m verifier.q_synthesis --size 500 --easy --medium --hard --semaphore 5 --out-file synth_v1.parquet
+
+# Train
+python -m rl.grpo \
+  --run-id <sft_mlflow_run_id> \
+  --synth-path data/synth_v1.parquet \
+  --epochs 3 \
+  --G 8 \
+  --alpha 1e-5
+
+# Chat / benchmark with RL adapter
+python -m models.chat --run-id <rl_mlflow_run_id>
+```

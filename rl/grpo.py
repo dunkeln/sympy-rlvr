@@ -38,7 +38,7 @@ def compute_log_probs(model, input_ids, gen_tokens, pad_id):
     logits = model(full_ids, attention_mask=attention_mask).logits  # [G, seq, vocab]
     prompt_len = input_ids.shape[1]
     completion_logits = logits[:, prompt_len - 1 : -1, :]  # [G, completion_len, vocab]
-    log_probs = F.log_softmax(completion_logits, dim=-1)
+    log_probs = F.log_softmax(completion_logits.float(), dim=-1)
     token_log_probs = log_probs.gather(dim=2, index=gen_tokens.unsqueeze(-1)).squeeze(
         -1
     )  # [G, completion_len]
@@ -79,6 +79,9 @@ def grpo_loss(
 def grpo(run_id: str):
     model, tokenizer = get_model(run_id)
     model = model.to(accelerator.device)
+    for name, param in model.named_parameters():
+        if "lora_" in name:
+            param.requires_grad_(True)
 
     ref_model, _ = get_model(run_id)
     ref_model = ref_model.to(accelerator.device)
@@ -106,27 +109,14 @@ def grpo(run_id: str):
                 do_sample=True,
                 temperature=temperature,
                 pad_token_id=pad_id,
-                output_scores=True,
-                return_dict_in_generate=True,
             )
 
-        seqs = outputs.sequences
-        scores = outputs.scores
+        seqs = outputs
         prompt_len = input_ids.shape[-1]
         gen_tokens = seqs[:, prompt_len:]  # [G, completion_len]
 
-        step_log_probs = []
-        for tok_idx, step_logits in enumerate(scores):
-            step_logprobs = torch.log_softmax(step_logits, dim=-1)
-            token_ids = gen_tokens[:, tok_idx]
-            idx = torch.arange(step_logprobs.size(0), device=step_logprobs.device)
-            step_log_probs.append(step_logprobs[idx, token_ids])
-
-        old_log_probs = torch.stack(step_log_probs, dim=1)  # [G, completion_len]
-        mask = (gen_tokens != pad_id).float()
-        old_log_probs = old_log_probs * mask
-
         with torch.no_grad():
+            old_log_probs = compute_log_probs(model, input_ids, gen_tokens, pad_id)
             ref_log_probs = compute_log_probs(ref_model, input_ids, gen_tokens, pad_id)
 
         texts = [
