@@ -243,5 +243,10 @@ if __name__ == "__main__":
     _mlflow.set_experiment("GRPO Training")
     _mlflow.config.enable_system_metrics_logging()
     _mlflow.config.set_system_metrics_sampling_interval(1)
-    with _mlflow.start_run():
+    _mlflow.start_run()
+    try:
         train()
+        _mlflow.end_run(status="FINISHED")
+    except Exception:
+        _mlflow.end_run(status="FAILED")
+        raise
