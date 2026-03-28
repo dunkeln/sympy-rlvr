@@ -3,8 +3,9 @@ import torch.nn.functional as F
 from pathlib import Path
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from concurrent.futures import ThreadPoolExecutor
 from models.chat import get_model
-from verifier.reward import reward
+from verifier.reward import reward, breakdown
 from rl.data_prep import load_rl_dataset
 from accelerate import Accelerator
 import click
@@ -138,7 +139,7 @@ def grpo(run_id: str):
 @click.option("--G", "g", default=8, show_default=True, help="completions per question")
 @click.option("--clip-eps", default=0.2, show_default=True)
 @click.option("--kl-beta", default=0.01, show_default=True)
-@click.option("--max-new-tokens", default=512, show_default=True)
+@click.option("--max-new-tokens", default=256, show_default=True)
 @click.option("--temperature", default=0.8, show_default=True)
 @click.option("--synth-path", required=True, help="path to verified synthesized parquet")
 def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperature, synth_path):
@@ -149,7 +150,7 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
     optim = torch.optim.Adam(trainable, lr=alpha)
 
     dataset = load_rl_dataset(synth_path=synth_path)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     if mlflow:
         mlflow.log_params(
@@ -183,8 +184,10 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                 )
                 model.train()
 
-                # score
-                rewards = [reward(t, ground_truth, question) for t in texts]
+                # score — parallel across G completions
+                with ThreadPoolExecutor() as ex:
+                    rewards = list(ex.map(lambda t: reward(t, ground_truth, question), texts))
+                    breakdowns = list(ex.map(lambda t: breakdown(t, ground_truth, question), texts))
                 advantages = compute_advantages(rewards)
 
                 # current policy log probs (with gradients)
@@ -212,6 +215,10 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                 bar.set_postfix(loss=f"{loss_val:.4f}", reward=f"{mean_reward:.2f}")
 
                 if mlflow and global_step % 25 == 0:
+                    component_means = {
+                        f"reward/{k}": sum(b[k] for b in breakdowns) / len(breakdowns)
+                        for k in breakdowns[0]
+                    }
                     mlflow.log_metrics(
                         {
                             "train/loss": loss_val,
@@ -219,6 +226,7 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                             "train/advantages_std": float(advantages.std().item()),
                             "gpu/memory_allocated_gb": torch.cuda.memory_allocated() / 1e9,
                             "gpu/memory_peak_gb": torch.cuda.max_memory_allocated() / 1e9,
+                            **component_means,
                         },
                         step=global_step,
                     )

@@ -139,6 +139,21 @@ def _extract(text: str) -> str:
     return numbers[-1].replace(",", "") if numbers else ""
 
 
+def breakdown(generated_text: str, ground_truth: str, question: str = "") -> dict:
+    """Return each reward component individually for logging."""
+    answer = _extract(generated_text)
+    return {
+        "correctness": verify(answer, ground_truth),
+        "self_consistency": self_consistency_reward(generated_text),
+        "reasoning_depth": reasoning_depth_reward(generated_text),
+        "number_grounding": number_grounding_reward(generated_text, question) if question else 0.0,
+        "format": format_reward(generated_text),
+        "parsability": parsability_reward(generated_text),
+        "length_sweet_spot": length_sweet_spot_reward(generated_text),
+        "repetition": repetition_penalty(generated_text),
+    }
+
+
 def reward(generated_text: str, ground_truth: str, question: str = "") -> float:
     """Dense combined reward — all rule-based, no LLM judge.
 
