@@ -129,6 +129,18 @@ def grpo(run_id: str):
     return model, tokenizer, ref_model, pad_id, rollout
 
 
+# --- checkpoint ---
+
+
+def _save_checkpoint(model):
+    adapter_dir = Path("artifacts/lora_adapter")
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(adapter_dir)
+    if mlflow:
+        mlflow.log_artifacts(adapter_dir.as_posix(), artifact_path="lora_adapter")
+    logger.info("saved RL adapter to %s", adapter_dir)
+
+
 # --- training loop ---
 
 
@@ -143,8 +155,18 @@ def grpo(run_id: str):
 @click.option("--temperature", default=0.8, show_default=True)
 @click.option("--synth-path", required=True, help="path to verified synthesized parquet")
 def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperature, synth_path):
+    import signal
+
     model, tokenizer, ref_model, pad_id, rollout = grpo(run_id)
     model.train()
+
+    def _save_and_exit(signum, frame):
+        logger.warning("signal %d received — saving checkpoint before exit", signum)
+        _save_checkpoint(model)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _save_and_exit)
+    signal.signal(signal.SIGINT, _save_and_exit)
 
     trainable = [p for p in model.parameters() if p.requires_grad]
     optim = torch.optim.Adam(trainable, lr=alpha)
@@ -236,13 +258,7 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
         if mlflow:
             mlflow.log_metric("epoch/loss", avg_loss, step=ep)
 
-    # save checkpoint
-    adapter_dir = Path("artifacts/lora_adapter")
-    adapter_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(adapter_dir)
-    if mlflow:
-        mlflow.log_artifacts(adapter_dir.as_posix(), artifact_path="lora_adapter")
-    logger.info("saved RL adapter to %s", adapter_dir)
+    _save_checkpoint(model)
 
 
 if __name__ == "__main__":
