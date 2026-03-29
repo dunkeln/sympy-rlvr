@@ -155,16 +155,19 @@ def breakdown(generated_text: str, ground_truth: str, question: str = "") -> dic
 
 
 def reward(generated_text: str, ground_truth: str, question: str = "") -> float:
-    """Dense combined reward — all rule-based, no LLM judge.
+    """Multiplicative reward — correctness gates everything else.
 
-    correctness:       0.50 — symbolic match or numeric proximity
-    self_consistency:  0.10 — final answer matches last reasoning value
-    reasoning_depth:   0.10 — mathematical operators/numbers in reasoning
-    number_grounding:  0.10 — question numbers appear in reasoning
-    format:            0.08 — XML tag structure
-    parsability:       0.07 — produces any numeric answer
-    length_sweet_spot: 0.03 — reasoning length in target band
-    repetition:        0.02 — no looping output (penalty)
+    Correctness is the primary signal (0.7 weight). Secondary signals
+    (format, reasoning quality) are gated by a correctness multiplier:
+    wrong answer → secondary contributes at most 1.5% of its value,
+    correct answer → secondary contributes fully.
+
+    This prevents the model from learning to game format/reasoning
+    while ignoring correctness.
+
+    correctness gate: 0.05 + 0.95 * correctness
+      → wrong (0.0): gate = 0.05  → secondary maxes at 0.015
+      → perfect (1.0): gate = 1.0 → secondary maxes at 0.30
     """
     answer = _extract(generated_text)
     c = verify(answer, ground_truth)
@@ -176,13 +179,21 @@ def reward(generated_text: str, ground_truth: str, question: str = "") -> float:
     ls = length_sweet_spot_reward(generated_text)
     rp = repetition_penalty(generated_text)
 
-    return (
-        0.50 * c
-        + 0.10 * sc
-        + 0.10 * rd
-        + 0.10 * ng
-        + 0.08 * f
-        + 0.07 * p
-        + 0.03 * ls
-        + 0.02 * rp
+    # secondary signals normalized to [0, 1]
+    secondary = (
+        0.25 * sc
+        + 0.20 * rd
+        + 0.20 * ng
+        + 0.15 * f
+        + 0.10 * p
+        + 0.05 * ls
+        + 0.05 * rp
     )
+
+    # correctness-scaled reward:
+    #   correct   (c=1): 0.6 + 0.4 * secondary  → [0.6, 1.0]
+    #   wrong     (c=0): 0.1 + 0.2 * secondary  → [0.1, 0.3]
+    #   proximity (0<c<1): interpolates smoothly between the two
+    base = 0.1 + 0.5 * c
+    secondary_weight = 0.2 + 0.2 * c
+    return base + secondary_weight * secondary

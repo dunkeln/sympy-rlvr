@@ -80,6 +80,7 @@ def grpo_loss(
 def grpo(run_id: str):
     model, tokenizer = get_model(run_id)
     model = model.to(accelerator.device)
+    model.config.use_cache = False
     for name, param in model.named_parameters():
         if "lora_" in name:
             param.requires_grad_(True)
@@ -102,18 +103,26 @@ def grpo(run_id: str):
         input_ids = inputs["input_ids"].repeat(G, 1)
         attention_mask = inputs["attention_mask"].repeat(G, 1)
 
+        # split into two half-batches to halve peak KV cache memory
+        half = G // 2
         with torch.no_grad():
-            outputs = model.generate(
-                input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                do_sample=True,
-                temperature=temperature,
-                pad_token_id=pad_id,
+            seqs_a = model.generate(
+                input_ids[:half], attention_mask=attention_mask[:half],
+                max_new_tokens=max_new_tokens, do_sample=True,
+                temperature=temperature, pad_token_id=pad_id,
+            )
+            seqs_b = model.generate(
+                input_ids[half:], attention_mask=attention_mask[half:],
+                max_new_tokens=max_new_tokens, do_sample=True,
+                temperature=temperature, pad_token_id=pad_id,
             )
 
-        seqs = outputs
         prompt_len = input_ids.shape[-1]
+        # pad to same completion length before concatenating
+        max_len = max(seqs_a.shape[1], seqs_b.shape[1])
+        seqs_a = torch.nn.functional.pad(seqs_a, (0, max_len - seqs_a.shape[1]), value=pad_id)
+        seqs_b = torch.nn.functional.pad(seqs_b, (0, max_len - seqs_b.shape[1]), value=pad_id)
+        seqs = torch.cat([seqs_a, seqs_b], dim=0)
         gen_tokens = seqs[:, prompt_len:]  # [G, completion_len]
 
         with torch.no_grad():
@@ -153,12 +162,14 @@ def _save_checkpoint(model):
 @click.option("--kl-beta", default=0.01, show_default=True)
 @click.option("--max-new-tokens", default=256, show_default=True)
 @click.option("--temperature", default=0.8, show_default=True)
+@click.option("--weight-decay", default=0.0, show_default=True, help="AdamW weight decay for grokking")
 @click.option("--synth-path", required=True, help="path to verified synthesized parquet")
-def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperature, synth_path):
+def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperature, weight_decay, synth_path):
     import signal
 
     model, tokenizer, ref_model, pad_id, rollout = grpo(run_id)
     model.train()
+    model.gradient_checkpointing_enable()
 
     def _save_and_exit(signum, frame):
         logger.warning("signal %d received — saving checkpoint before exit", signum)
@@ -169,7 +180,7 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
     signal.signal(signal.SIGINT, _save_and_exit)
 
     trainable = [p for p in model.parameters() if p.requires_grad]
-    optim = torch.optim.Adam(trainable, lr=alpha)
+    optim = torch.optim.AdamW(trainable, lr=alpha, weight_decay=weight_decay)
 
     dataset = load_rl_dataset(synth_path=synth_path)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
@@ -183,12 +194,16 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                 "G": g,
                 "clip_eps": clip_eps,
                 "kl_beta": kl_beta,
+                "weight_decay": weight_decay,
                 "synth_path": synth_path,
                 "dataset_size": len(dataset),
             }
         )
 
     global_step = 0
+    ema_correctness = None
+    ema_reward = None
+    ema_alpha = 0.05  # smoothing factor — lower = smoother
     for ep in range(1, epochs + 1):
         epoch_loss = 0.0
         with tqdm(dataloader, desc=f"epoch {ep}", unit="q") as bar:
@@ -231,10 +246,15 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
 
                 loss_val = float(loss.detach().item())
                 mean_reward = sum(rewards) / len(rewards)
+                mean_correctness = sum(b["correctness"] for b in breakdowns) / len(breakdowns)
                 epoch_loss += loss_val
                 global_step += 1
 
-                bar.set_postfix(loss=f"{loss_val:.4f}", reward=f"{mean_reward:.2f}")
+                # EMA for smooth trend tracking
+                ema_correctness = mean_correctness if ema_correctness is None else ema_alpha * mean_correctness + (1 - ema_alpha) * ema_correctness
+                ema_reward = mean_reward if ema_reward is None else ema_alpha * mean_reward + (1 - ema_alpha) * ema_reward
+
+                bar.set_postfix(loss=f"{loss_val:.4f}", reward=f"{mean_reward:.2f}", ema_c=f"{ema_correctness:.2f}")
 
                 if mlflow and global_step % 25 == 0:
                     component_means = {
@@ -246,6 +266,8 @@ def train(run_id, epochs, alpha, g, clip_eps, kl_beta, max_new_tokens, temperatu
                             "train/loss": loss_val,
                             "train/mean_reward": mean_reward,
                             "train/advantages_std": float(advantages.std().item()),
+                            "train/ema_correctness": ema_correctness,
+                            "train/ema_reward": ema_reward,
                             "gpu/memory_allocated_gb": torch.cuda.memory_allocated() / 1e9,
                             "gpu/memory_peak_gb": torch.cuda.max_memory_allocated() / 1e9,
                             **component_means,

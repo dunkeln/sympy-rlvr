@@ -23,6 +23,7 @@ def get_model():
         model = AutoModelForCausalLM.from_pretrained(
             settings.model_repo_id,
             dtype="bfloat16",
+            attn_implementation="flash_attention_2",
             local_files_only=True,
         ).to(accelerator.device)
         tokenizer = AutoTokenizer.from_pretrained(
@@ -37,11 +38,9 @@ def get_model():
         model = AutoModelForCausalLM.from_pretrained(
             settings.model_repo_id,
             dtype="bfloat16",
+            attn_implementation="flash_attention_2",
         ).to(accelerator.device)
         tokenizer = AutoTokenizer.from_pretrained(settings.model_repo_id)
 
-    model.config.use_cache = False
-    logger.info(
-        "Loaded model=%s, use_cache=%s", settings.model_repo_id, model.config.use_cache
-    )
+    logger.info("Loaded model=%s", settings.model_repo_id)
     return model, tokenizer
